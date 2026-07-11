@@ -10,7 +10,6 @@ pipeline {
       steps {
         sh 'echo passed'
         //git branch: 'main', url: 'https://github.com/Krutik2710/Jenkins-Project.git'
-
       }
     }
     stage('Build and Test') {
@@ -26,7 +25,19 @@ pipeline {
       }
       steps {
         withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-          sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}'
+          sh '''
+            # SonarQube 25.x's scanner engine requires Java 17+, but this
+            # container's default JDK is 11. Install JDK 17 inside the
+            # existing container (runs as root) just for this step, without
+            # touching the pipeline's agent config.
+            apt-get update -qq && apt-get install -y -qq openjdk-17-jdk-headless
+
+            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+            export PATH=$JAVA_HOME/bin:$PATH
+            java -version
+
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}
+          '''
         }
       }
     }
