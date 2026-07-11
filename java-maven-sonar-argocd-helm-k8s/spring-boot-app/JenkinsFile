@@ -1,85 +1,113 @@
 pipeline {
-  agent {
-    docker {
-      image 'abhishekf5/maven-abhishek-docker-agent:v1'
-      args '--user root -v /var/run/docker.sock:/var/run/docker.sock' // mount Docker socket to access the host's Docker daemon
-    }
-  }
-  stages {
-    stage('Checkout') {
-      steps {
-        sh 'echo passed'
-        //git branch: 'main', url: 'https://github.com/Krutik2710/Jenkins-Project.git'
-      }
-    }
-    stage('Build and Test') {
-      steps {
-        sh 'ls -ltr'
-        // build the project and create a JAR file
-        sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package'
-      }
-    }
-    stage('Static Code Analysis') {
-      environment {
-        SONAR_URL = "http://3.80.183.234:9000"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-          sh '''
-            # SonarQube 25.x's scanner engine requires Java 17+, but this
-            # container's default JDK is 11. Install JDK 17 inside the
-            # existing container (runs as root) just for this step, without
-            # touching the pipeline's agent config.
-            apt-get update -qq && apt-get install -y -qq openjdk-17-jdk-headless
-
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            export PATH=$JAVA_HOME/bin:$PATH
-            java -version
-
-            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}
-          '''
+    agent {
+        docker {
+            image 'abhishekf5/maven-abhishek-docker-agent:v1'
+            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
         }
-      }
     }
-    stage('Build and Push Docker Image') {
-      environment {
+
+    environment {
+        SONAR_URL = "http://3.80.183.234:9000"
         DOCKER_IMAGE = "krutik2710/ultimate-cicd:${BUILD_NUMBER}"
-        // DOCKERFILE_LOCATION = "java-maven-sonar-argocd-helm-k8s/spring-boot-app/Dockerfile"
-        REGISTRY_CREDENTIALS = credentials('docker-cred')
-        // The docker CLI bundled in this container image defaults to an
-        // old API version (1.41) and fails against the host's upgraded
-        // Docker daemon, which now requires API 1.44+. Force the client
-        // to negotiate the newer API instead of reinstalling the CLI.
         DOCKER_API_VERSION = "1.44"
-      }
-      steps {
-        script {
-            sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && docker build -t ${DOCKER_IMAGE} .'
-            def dockerImage = docker.image("${DOCKER_IMAGE}")
-            docker.withRegistry('https://index.docker.io/v1/', "docker-cred") {
-                dockerImage.push()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                sh 'echo "Repository checked out successfully."'
             }
         }
-      }
-    }
-    stage('Update Deployment File') {
-        environment {
-            GIT_REPO_NAME = "Jenkins-Project"
-            GIT_USER_NAME = "Krutik2710"
-        }
-        steps {
-            withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+
+        stage('Build and Test') {
+            steps {
                 sh '''
-                    git config user.email "krutiku2710@gmail.com"
-                    git config user.name "Krutik Ukunde"
-                    BUILD_NUMBER=${BUILD_NUMBER}
-                    sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-                    git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-                    git commit -m "Update deployment image to version ${BUILD_NUMBER}"
-                    git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
+                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+                    mvn clean package
                 '''
             }
         }
+
+        stage('Static Code Analysis') {
+            steps {
+                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
+
+                    sh '''
+                        apt-get update -qq
+                        apt-get install -y -qq openjdk-17-jdk-headless
+
+                        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+                        export PATH=$JAVA_HOME/bin:$PATH
+
+                        java -version
+
+                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+                        mvn sonar:sonar \
+                          -Dsonar.login=$SONAR_AUTH_TOKEN \
+                          -Dsonar.host.url=${SONAR_URL}
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+                    docker build \
+                        -t ${DOCKER_IMAGE} .
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-cred') {
+
+                        docker.image("${DOCKER_IMAGE}").push()
+
+                    }
+
+                }
+            }
+        }
+
+        stage('Update Deployment Manifest') {
+            steps {
+
+                withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
+
+                    sh '''
+
+                        git checkout main
+
+                        git config user.email "krutiku2710@gmail.com"
+                        git config user.name "Krutik Ukunde"
+
+                        DEPLOYMENT_FILE=java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+
+                        sed -Ei "s|(image: krutik2710/ultimate-cicd:).*|\\1${BUILD_NUMBER}|" $DEPLOYMENT_FILE
+
+                        git add $DEPLOYMENT_FILE
+
+                        if git diff --cached --quiet; then
+                            echo "No deployment changes found."
+                            exit 0
+                        fi
+
+                        git commit -m "Update deployment image to version ${BUILD_NUMBER}"
+
+                        git push https://${GITHUB_TOKEN}@github.com/Krutik2710/Jenkins-Project.git main
+
+                    '''
+                }
+
+            }
+        }
     }
-  }
 }
