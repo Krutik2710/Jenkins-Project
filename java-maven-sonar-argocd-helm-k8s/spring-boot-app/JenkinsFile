@@ -46,6 +46,11 @@ pipeline {
         DOCKER_IMAGE = "abhishekf5/ultimate-cicd:${BUILD_NUMBER}"
         // DOCKERFILE_LOCATION = "java-maven-sonar-argocd-helm-k8s/spring-boot-app/Dockerfile"
         REGISTRY_CREDENTIALS = credentials('docker-cred')
+        // The docker CLI bundled in this container image defaults to an
+        // old API version (1.41) and fails against the host's upgraded
+        // Docker daemon, which now requires API 1.44+. Force the client
+        // to negotiate the newer API instead of reinstalling the CLI.
+        DOCKER_API_VERSION = "1.44"
       }
       steps {
         script {
