@@ -26,7 +26,8 @@ The objective was to simulate a production-grade DevOps workflow while learning 
 
 <p align="center">
 
-![Architecture](docs/architecture.png)
+<img width="1386" height="565" alt="1783867455724" src="https://github.com/user-attachments/assets/ebf6bfb3-c63a-489e-b95b-f7523902e805" />
+
 
 </p>
 
